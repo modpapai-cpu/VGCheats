@@ -170,6 +170,116 @@ exports.registerPublic = onCall(async req=>{
   return {token,user:safeUser(a,0)};
 });
 
+
+function ownerOtpKey(email){
+  return crypto.createHash("sha256").update(clean(email).toLowerCase()).digest("hex");
+}
+function hashOtp(email,otp){
+  return crypto.createHash("sha256").update(ownerOtpKey(email)+":"+String(otp)).digest("hex");
+}
+async function getOrCreateOwnerAuth(email){
+  try{
+    return await admin.auth().getUserByEmail(email);
+  }catch(e){
+    if(e && e.code!=="auth/user-not-found") throw e;
+    return await admin.auth().createUser({
+      email,
+      emailVerified:true,
+      displayName:"Owner"
+    });
+  }
+}
+
+/* Server-side owner OTP.
+   OWNER_EMAILS is a Firebase Secret containing one or more allowed owner emails.
+   EmailJS sends the message; the OTP itself is generated and verified here. */
+exports.sendOwnerOtp = onCall({secrets:[OWNER_EMAILS]}, async req=>{
+  const email=clean(req.data?.email).toLowerCase();
+  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
+    throw new HttpsError("invalid-argument","Valid email required.");
+  if(!ownerEmails().includes(email))
+    throw new HttpsError("permission-denied","This Gmail is not configured as an Owner email.");
+
+  const ref=db.ref(`${ROOT}/secure/ownerOtp/${ownerOtpKey(email)}`);
+  const existing=await ref.get();
+  if(existing.exists() && (Date.now()-(existing.val().sentAt||0))<60000)
+    throw new HttpsError("resource-exhausted","Please wait 60 seconds before requesting another OTP.");
+
+  const otp=String(crypto.randomInt(100000,1000000));
+  await ref.set({
+    hash:hashOtp(email,otp),
+    sentAt:Date.now(),
+    expiresAt:Date.now()+10*60*1000,
+    attempts:0
+  });
+
+  const response=await fetch("https://api.emailjs.com/api/v1.0/email/send",{
+    method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({
+      service_id:"service_v83whaa",
+      template_id:"template_8xz1735",
+      user_id:"adTWdxyIkZi72dEqN",
+      template_params:{
+        to_email:email,
+        email,
+        name:"VG CHEATS",
+        otp,
+        app_name:"VG CHEATS"
+      }
+    })
+  });
+  if(!response.ok){
+    await ref.remove().catch(()=>{});
+    const txt=await response.text().catch(()=>"");
+    logger.error("EmailJS OTP send failed",txt);
+    throw new HttpsError("internal","Unable to send OTP email. Check EmailJS service/template.");
+  }
+
+  return {ok:true,message:"📩 OTP sent to Gmail"};
+});
+
+exports.verifyOwnerOtp = onCall({secrets:[OWNER_EMAILS]}, async req=>{
+  const email=clean(req.data?.email).toLowerCase();
+  const otp=clean(req.data?.otp);
+  if(!ownerEmails().includes(email))
+    throw new HttpsError("permission-denied","This Gmail is not configured as an Owner email.");
+  if(!/^\d{6}$/.test(otp))
+    throw new HttpsError("invalid-argument","Enter the 6-digit OTP.");
+
+  const ref=db.ref(`${ROOT}/secure/ownerOtp/${ownerOtpKey(email)}`);
+  const snap=await ref.get();
+  const data=snap.val();
+  if(!data) throw new HttpsError("failed-precondition","OTP expired. Send a new OTP.");
+  if(Date.now()>Number(data.expiresAt||0)){
+    await ref.remove().catch(()=>{});
+    throw new HttpsError("failed-precondition","OTP expired. Send a new OTP.");
+  }
+  const attempts=Number(data.attempts||0);
+  if(attempts>=5){
+    await ref.remove().catch(()=>{});
+    throw new HttpsError("resource-exhausted","Too many wrong attempts. Send a new OTP.");
+  }
+
+  if(hashOtp(email,otp)!==data.hash){
+    await ref.update({attempts:attempts+1});
+    throw new HttpsError("permission-denied","Wrong OTP.");
+  }
+
+  await ref.remove().catch(()=>{});
+  const au=await getOrCreateOwnerAuth(email);
+  await admin.auth().updateUser(au.uid,{emailVerified:true});
+  await setClaims(au.uid,"owner",{off:0,blocked:false});
+
+  const token=await admin.auth().createCustomToken(au.uid,{role:"owner",off:0,blocked:false});
+  await userRef(au.uid).update({username:"Owner",email,role:"owner",wallet:0});
+
+  return {
+    token,
+    user:{uid:au.uid,u:"Owner",username:"Owner",email,role:"owner",off:0,blocked:false,freePanels:[],wallet:0}
+  };
+});
+
 exports.ensureGoogleRole = onCall(async req=>{
   requireAuth(req);
   const email=clean(req.auth.token.email).toLowerCase();
