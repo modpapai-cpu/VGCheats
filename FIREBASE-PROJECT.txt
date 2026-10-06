@@ -1,0 +1,2 @@
+Firebase Project ID: vgshop-6009a
+Realtime Database: https://vgshop-6009a-default-rtdb.firebaseio.com

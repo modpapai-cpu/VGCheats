@@ -1,0 +1,58 @@
+{
+  "rules": {
+    "vgcheats": {
+      "public": {
+        ".read": "auth != null",
+        "$key": {
+          ".write": "auth != null && auth.token.role == 'owner'"
+        }
+      },
+      "accounts": {
+        ".read": "auth != null && auth.token.role == 'owner'",
+        "$key": {
+          ".write": "auth != null && auth.token.role == 'owner'"
+        }
+      },
+      "users": {
+        "$uid": {
+          ".read": "auth != null && (auth.uid == $uid || auth.token.role == 'owner')",
+          ".write": "auth != null && auth.uid == $uid",
+          "wallet": {
+            ".read": "auth != null && (auth.uid == $uid || auth.token.role == 'owner')",
+            ".write": "auth != null && auth.token.role == 'owner'"
+          },
+          "orders": {
+            ".read": "auth != null && (auth.uid == $uid || auth.token.role == 'owner' || auth.token.role == 'admin')",
+            ".write": "auth != null && auth.uid == $uid"
+          },
+          "avatar": {
+            ".read": "auth != null && (auth.uid == $uid || auth.token.role == 'owner')",
+            ".write": "auth != null && auth.uid == $uid"
+          }
+        }
+      },
+      "orders": {
+        ".read": "auth != null && (auth.token.role == 'owner' || auth.token.role == 'admin')",
+        ".write": "auth != null && auth.token.role == 'owner'",
+        "$uid": {
+          "$orderId": {
+            ".read": "auth != null && (auth.token.role == 'owner' || auth.token.role == 'admin' || auth.uid == $uid)",
+            ".write": "auth != null && (auth.token.role == 'owner' || auth.uid == $uid)"
+          }
+        }
+      },
+      "secure": {
+        "keypool": {
+          ".read": "auth != null && auth.token.role == 'owner'",
+          ".write": "auth != null && auth.token.role == 'owner'",
+          "$pid": {
+            "$idx": {
+              ".read": "auth != null && auth.token.role == 'owner'",
+              ".write": "auth != null && auth.token.role == 'owner'"
+            }
+          }
+        }
+      }
+    }
+  }
+}

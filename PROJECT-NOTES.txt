@@ -1,0 +1,28 @@
+VG CHEATS SHOP — SECURE BUILD
+==============================
+
+Design unchanged.
+
+This build adds:
+- Firebase Auth
+- Firebase custom claims for owner/admin/reseller/public
+- Realtime Database security rules
+- Firebase Cloud Functions
+- Razorpay server-side order creation and signature verification
+- Secure wallet transactions
+- Secure key-pool delivery
+- Owner-only user management
+- Owner-only order approval/rejection
+- Vercel + GitHub deployment files
+
+Before deployment, put your Firebase Web App config into index.html.
+
+Backend secrets must be configured with Firebase Secret Manager:
+OWNER_EMAILS
+RAZORPAY_KEY_ID
+RAZORPAY_KEY_SECRET
+
+Cloud Functions deploy separately from Vercel:
+firebase deploy --only functions,database
+
+Frontend deploys through GitHub -> Vercel.
