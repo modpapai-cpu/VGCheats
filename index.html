@@ -1017,7 +1017,7 @@ nav button:hover{box-shadow:0 0 15px #00e5ff;transform:translateY(-2px)}
   <div id="gmPop" style="display:none"></div>
   <button class="otpbtn" onclick="sendOtp()">📩 Send OTP</button>
   <div id="otpStep" style="display:none">
-    <input id="o_otp" type="tel" inputmode="numeric" maxlength="6" placeholder="6 digit OTP">
+    <input id="o_otp" type="tel" maxlength="4" placeholder="4 digit OTP">
     <button class="otpbtn otpbtn2" onclick="verifyOtp()">✅ Verify & Login</button>
     <div id="demoOtpBox"></div>
   </div>
@@ -1333,17 +1333,53 @@ function storageOK(){try{localStorage.setItem('vg_t','1');localStorage.removeIte
    Database → Realtime Database → Create → Rules me read/write true karo. */
 let DB=null;
 const CLOUD_KEYS=['vg_rates','vg_videos','vg_thumbs','vg_links','vg_custom_panels','vg_users','vg_wallet','vg_keypool','vg_orders','vg_site','vg_owner_email','vg_owner_gmails','vg_panelinfo','vg_avatars','vg_order'];
-
-/* Firebase is authoritative through the secure bridge below.
-   Do not mirror arbitrary localStorage keys into the database from the browser. */
 function cloudInit(){
-  if(!GOOGLE_ON || typeof firebase==='undefined' || !firebase.database)return;
-  try{
+ if(!GOOGLE_ON||typeof firebase==='undefined'||!firebase.database)return;
+ try{
+  if(!firebase.apps.length)firebase.initializeApp(FIREBASE_CFG);
+  const startSync=()=>{
+   try{
     DB=firebase.database();
-  }catch(e){
-    DB=null;
-    console.warn("Firebase database init failed:",e);
-  }
+    CLOUD_KEYS.forEach(k=>{
+     try{
+      DB.ref('vgcheats/'+k).on('value',snap=>{
+       const v=snap.val();
+       if(v===null||v===undefined)return;
+       try{
+        const nv=(typeof v==='string')?v:JSON.stringify(v);
+        if(localStorage.getItem(k)!==nv){localStorage.setItem(k,nv);cloudRefresh(k);}
+       }catch(e){}
+      });
+     }catch(e){}
+    });
+    // First-load migration: if Firebase has no value, upload the current browser data.
+    CLOUD_KEYS.forEach(k=>{
+     try{
+      DB.ref('vgcheats/'+k).once('value').then(s=>{
+       if(s.exists())return;
+       const raw=localStorage.getItem(k);
+       if(raw===null)return;
+       let v=raw;try{v=JSON.parse(raw);}catch(e){}
+       DB.ref('vgcheats/'+k).set(v);
+      }).catch(()=>{});
+     }catch(e){}
+    });
+   }catch(e){DB=null;console.warn("Firebase database init failed:",e);}
+  };
+  // Anonymous auth keeps the existing UI unchanged while satisfying auth-required DB rules.
+  if(firebase.auth){
+   firebase.auth().onAuthStateChanged(u=>{
+    if(u) startSync();
+   });
+   if(!firebase.auth().currentUser){
+    firebase.auth().signInAnonymously().catch(e=>{
+     console.warn("Anonymous Firebase auth failed:",e);
+     // Still try the database in case the project rules allow it.
+     startSync();
+    });
+   }else startSync();
+  }else startSync();
+ }catch(e){DB=null;console.warn("Firebase cloud init failed:",e);}
 }
 function cloudSet(k){
  if(!DB)return;
@@ -1614,10 +1650,15 @@ function closeOwnerLogin(){
  hideFx('ownerBg','ownerModal');
 }
 function sendOtp(){
- const m=document.getElementById('o_gmail').value.trim().toLowerCase();
- if(!m||!m.includes('@')||!m.includes('.')){msgBox('Please enter a valid Gmail');return;}
+ const m=String(document.getElementById('o_gmail').value||'').trim().toLowerCase();
+ // Accept normal Gmail addresses such as indiansrikant82@gmail.com.
+ // Do not rely on the browser's input validity state.
+ if(!/^[^\\s@]+@gmail\\.com$/i.test(m)){
+  msgBox('Please enter a valid Gmail address (example: name@gmail.com)');
+  return;
+ }
  let saved='';
- try{saved=(localStorage.getItem('vg_owner_email')||'').toLowerCase().trim();}catch(e){}
+ try{saved=String(localStorage.getItem('vg_owner_email')||'').trim().toLowerCase();}catch(e){}
  if(!saved){
   try{localStorage.setItem('vg_owner_email',m);}catch(e){}
   saved=m;
@@ -3206,54 +3247,16 @@ try{if(window._restoreSession){window._restoreSession=false;enterShop();}}catch(
     }
   };
 
-  /* Owner Gmail OTP is server-verified. The browser never decides
-     whether an email or OTP is valid. */
-  window.sendOtp=async function(){
-    const m=document.getElementById('o_gmail').value.trim().toLowerCase();
-    if(!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(m)){
-      msgBox('Please enter a valid Gmail');return;
-    }
-    const dbx=document.getElementById('demoOtpBox');
-    document.getElementById('otpStep').style.display='block';
-    dbx.style.display='block';
-    dbx.innerHTML='⏳ Sending secure OTP...';
-    try{
-      const r=await fn('sendOwnerOtp',{email:m});
-      dbx.innerHTML='📩 OTP sent to Gmail (<b>'+m+'</b>) ✅<br><small style="color:#9ab">Check Inbox + Spam. OTP expires in 10 minutes.</small>';
-      showToast(r&&r.message?r.message:'📩 OTP sent to Gmail');
-    }catch(e){
-      dbx.innerHTML='❌ '+(e.message||'Unable to send OTP');
-      msgBox('❌ '+(e.message||'Unable to send OTP'));
-    }
-  };
-
+  /* Owner modal still looks the same. OTP can be completed, but the final
+     authority is Firebase Google identity + server-side OWNER_EMAILS. */
   window.ownerLoginOK=async function(){
-    /* Kept for compatibility with the existing UI. OTP verification now
-       performs the actual Firebase sign-in. */
-    const email=document.getElementById('o_gmail').value.trim().toLowerCase();
-    if(email) return window.verifyOtp();
+    closeOwnerLogin();
+    await window.googleLogin();
   };
-
   window.verifyOtp=async function(){
-    const email=document.getElementById('o_gmail').value.trim().toLowerCase();
-    const otp=document.getElementById('o_otp').value.trim();
-    if(!email || !otp){msgBox('Enter the OTP');return;}
-    try{
-      const r=await fn('verifyOwnerOtp',{email,otp});
-      await firebase.auth().signInWithCustomToken(r.token);
-      const p=r.user||{};
-      sessionStorage.setItem('vg_user','Owner');
-      sessionStorage.setItem('vg_role','owner');
-      sessionStorage.setItem('vg_off','0');
-      localSet('vg_secure_profile',p);
-      closeOwnerLogin();
-      await secureSync();
-      const card=document.getElementById('loginCard');
-      card.classList.add('spinning');
-      setTimeout(enterShop,700);
-    }catch(e){
-      msgBox('❌ OTP verification failed: '+(e.message||e));
-    }
+    const v=document.getElementById('o_otp').value.trim();
+    if(!demoOtp||v!==demoOtp){msgBox('❌ Wrong OTP!');return;}
+    demoOtp=null;await window.ownerLoginOK();
   };
 
   /* Firebase-native password reset replaces the old client-side password reset. */

@@ -15,37 +15,33 @@
       },
       "users": {
         "$uid": {
-          ".read": "auth != null && (auth.uid == $uid || auth.token.role == 'owner' || auth.token.role == 'admin')",
-          ".write": false,
+          ".read": "auth != null && (auth.uid == $uid || auth.token.role == 'owner')",
+          ".write": "auth != null && auth.uid == $uid",
           "wallet": {
-            ".read": "auth != null && (auth.uid == $uid || auth.token.role == 'owner' || auth.token.role == 'admin')",
+            ".read": "auth != null && (auth.uid == $uid || auth.token.role == 'owner')",
             ".write": "auth != null && auth.token.role == 'owner'"
           },
           "orders": {
             ".read": "auth != null && (auth.uid == $uid || auth.token.role == 'owner' || auth.token.role == 'admin')",
-            ".write": false
+            ".write": "auth != null && auth.uid == $uid"
           },
           "avatar": {
-            ".read": "auth != null && (auth.uid == $uid || auth.token.role == 'owner' || auth.token.role == 'admin')",
+            ".read": "auth != null && (auth.uid == $uid || auth.token.role == 'owner')",
             ".write": "auth != null && auth.uid == $uid"
           }
         }
       },
       "orders": {
         ".read": "auth != null && (auth.token.role == 'owner' || auth.token.role == 'admin')",
-        ".write": false,
+        ".write": "auth != null && auth.token.role == 'owner'",
         "$uid": {
-          ".read": "auth != null && (auth.token.role == 'owner' || auth.token.role == 'admin' || auth.uid == $uid)",
-          ".write": false,
           "$orderId": {
             ".read": "auth != null && (auth.token.role == 'owner' || auth.token.role == 'admin' || auth.uid == $uid)",
-            ".write": false
+            ".write": "auth != null && (auth.token.role == 'owner' || auth.uid == $uid)"
           }
         }
       },
       "secure": {
-        ".read": false,
-        ".write": false,
         "keypool": {
           ".read": "auth != null && auth.token.role == 'owner'",
           ".write": "auth != null && auth.token.role == 'owner'",

@@ -191,25 +191,3 @@ No visual redesign was intentionally made. The secure backend is layered underne
 This package is preconfigured for Firebase project `vgshop-6009a`. Do not add the Firebase web config again.
 
 Before production use, enable Authentication providers (Anonymous/Google as used by the UI), create Realtime Database, deploy the supplied rules and Cloud Functions, and add the Vercel domain under Firebase Authentication → Settings → Authorized domains.
-
-
-## Owner Gmail OTP (secure)
-The Owner OTP is server-side verified. The browser no longer decides whether an OTP is valid and does not launch Google Login after OTP.
-
-Before deploying Functions, configure the Owner Gmail:
-```bash
-firebase functions:secrets:set OWNER_EMAILS
-```
-When prompted, enter the allowed owner email(s), comma-separated if needed.
-
-The EmailJS service/template/public key used by the existing site are used by the `sendOwnerOtp` Cloud Function to send the OTP. The OTP is generated, hashed, stored with a 10-minute expiry and max 5 attempts, then verified server-side.
-
-The Owner OTP input is 6 digits.
-
-## Deploy
-```bash
-firebase use vgshop-6009a
-firebase deploy --only functions,database
-```
-
-After changing Functions, Vercel only needs the updated `index.html` from GitHub. Firebase Functions are deployed separately with the Firebase CLI.
