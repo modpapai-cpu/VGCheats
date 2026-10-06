@@ -1076,6 +1076,9 @@ if(GOOGLE_ON){
   }catch(e){console.warn("Firebase init failed:",e);}
 }
 /* ===== OWNER: Gmail OTP login ===== */
+// Fixed Owner Gmail. Only this address can start the Owner OTP login.
+const OWNER_EMAIL="indiansrikant82@gmail.com";
+
 const products=[
  {id:1,game:'FREEFIRE',device:'ANDROID',emoji:'💎',name:'Diamond Panel',price:999,desc:'Premium panel, fast service, 30 days validity',features:['PREMIUM QUALITY','FAST SERVICE','30 DAYS VALIDITY'],tg:'https://t.me/diamond_panel_channel',dc:'https://discord.gg/wKTzG3kDBQ',rates:[{label:'7 Days',price:399},{label:'15 Days',price:649},{label:'30 Days',price:999},{label:'60 Days',price:1799}]},
  {id:2,game:'FREEFIRE',device:'IOS',emoji:'🥇',name:'Gold Panel',price:599,desc:'Popular choice, best seller',features:['POPULAR CHOICE','BEST SELLER','INSTANT DELIVERY'],tg:'https://t.me/gold_panel_channel',dc:'https://discord.gg/wKTzG3kDBQ',rates:[{label:'7 Days',price:249},{label:'15 Days',price:399},{label:'30 Days',price:599},{label:'60 Days',price:1099}]},
@@ -1627,7 +1630,7 @@ function showGmPop(){
  box.style.display='block';
 }
 async function ownerLoginOK(){
- const gm=document.getElementById('o_gmail').value.trim().toLowerCase();
+ const gm=String(OWNER_EMAIL).trim().toLowerCase();
  closeOwnerLogin();
  sessionStorage.setItem('vg_role','owner');
  sessionStorage.setItem('vg_user','Owner');
@@ -1650,40 +1653,45 @@ function closeOwnerLogin(){
  hideFx('ownerBg','ownerModal');
 }
 function sendOtp(){
- const m=String(document.getElementById('o_gmail').value||'').trim().toLowerCase();
- // Accept normal Gmail addresses such as indiansrikant82@gmail.com.
- // Do not rely on the browser's input validity state.
- if(!/^[^\\s@]+@gmail\\.com$/i.test(m)){
-  msgBox('Please enter a valid Gmail address (example: name@gmail.com)');
+ const el=document.getElementById('o_gmail');
+ const raw=el?String(el.value||''):'';
+ // Remove invisible characters that can be introduced by browser autofill/copy-paste.
+ const m=raw.replace(/[\u200B-\u200D\uFEFF]/g,'').trim().toLowerCase();
+ const owner=String(OWNER_EMAIL).trim().toLowerCase();
+ if(!/^[^\s@]+@gmail\.com$/.test(m)){
+  msgBox('Please enter a valid Gmail address\n(example: name@gmail.com)');
   return;
  }
- let saved='';
- try{saved=String(localStorage.getItem('vg_owner_email')||'').trim().toLowerCase();}catch(e){}
- if(!saved){
-  try{localStorage.setItem('vg_owner_email',m);}catch(e){}
-  saved=m;
-  try{document.getElementById('o_email').value=m;}catch(e){}
-  msgBox('✅ First time — this Gmail is saved as Owner!');
+ if(m!==owner){
+  msgBox('❌ This Gmail is not the Owner Gmail.');
+  return;
  }
- if(m!==saved){msgBox('❌ This Gmail is not the Owner.');return;}
+ // Keep the verified owner address locally only as a convenience; it is not used to grant access.
+ try{localStorage.setItem('vg_owner_email',owner);}catch(e){}
+ try{if(el)el.value=owner;}catch(e){}
  demoOtp=String(Math.floor(1000+Math.random()*9000));
  document.getElementById('otpStep').style.display='block';
  const db=document.getElementById('demoOtpBox');
+ db.style.display='block';
  if(EMAIL_ON){
-  // ==== ASLI EMAIL OTP ====
-  db.style.display='block';
-  db.innerHTML='⏳ Sending OTP...';
-  emailjs.send(EMAILJS_SERVICE_ID,EMAILJS_TEMPLATE_ID,{to_email:m,email:m,name:'VG CHEATS',otp:demoOtp,app_name:'VG CHEATS'}).then(()=>{
-   db.innerHTML='📩 OTP sent to your Gmail (<b>'+m+'</b>) ✅<br><small style="color:#9ab">Check Inbox + Spam</small>';
-   showToast('📩 OTP sent to Gmail');
-  }).catch(e=>{db.innerHTML='❌ Email fail: '+(e&&e.text?e.text:'check key/service');});
+  db.innerHTML='⏳ Sending OTP to <b>'+owner+'</b>...';
+  try{
+   emailjs.send(EMAILJS_SERVICE_ID,EMAILJS_TEMPLATE_ID,{to_email:owner,email:owner,name:'VG CHEATS',otp:demoOtp,app_name:'VG CHEATS'}).then(()=>{
+    db.innerHTML='📩 OTP sent to <b>'+owner+'</b> ✅<br><small style="color:#9ab">Check Inbox + Spam</small>';
+    showToast('📩 OTP sent to Owner Gmail');
+   }).catch(e=>{
+    db.innerHTML='❌ Email failed: '+(e&&e.text?e.text:'EmailJS error');
+    showToast('❌ OTP email failed');
+   });
+  }catch(e){
+   db.innerHTML='❌ Email service failed.';
+  }
   return;
  }
- // ==== DEMO (EmailJS setup nahi hua) ====
- db.style.display='block';
- db.innerHTML='📩 Demo OTP: <span style="font-size:1.4rem">'+demoOtp+'</span><br><small style="color:#9ab">(For Gmail OTP, setup EmailJS — see top of file, FREE)</small>';
- showToast('📩 OTP sent');
+ db.innerHTML='❌ Owner OTP email service is not configured.';
+ showToast('❌ Email OTP service unavailable');
 }
+
 function verifyOtp(){
  const v=document.getElementById('o_otp').value.trim();
  if(!demoOtp||v!==demoOtp){msgBox('❌ Wrong OTP! Send again.');return;}
