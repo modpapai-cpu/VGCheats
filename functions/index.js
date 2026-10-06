@@ -170,7 +170,7 @@ exports.registerPublic = onCall(async req=>{
   return {token,user:safeUser(a,0)};
 });
 
-exports.ensureGoogleRole = onCall(async req=>{
+exports.ensureGoogleRole = onCall({secrets:[OWNER_EMAILS]},async req=>{
   requireAuth(req);
   const email=clean(req.auth.token.email).toLowerCase();
   if(!email) throw new HttpsError("permission-denied","Google account has no email.");
@@ -193,6 +193,115 @@ exports.ensureGoogleRole = onCall(async req=>{
   }
   const w=(await userRef(req.auth.uid).child("wallet").get()).val()||0;
   return {user:safeUser(a,w)};
+});
+
+
+/* ===== OWNER EMAIL OTP AUTH =====
+   OTP is generated and verified on the trusted Firebase server.
+   The browser never decides the OTP or grants itself the owner role. */
+const OWNER_OTP_PATH = `${ROOT}/auth/ownerOtp`;
+const EMAILJS_SERVICE_ID = "service_v83whaa";
+const EMAILJS_TEMPLATE_ID = "template_8xz1735";
+const EMAILJS_PUBLIC_KEY = "adTWdxyIkZi72dEqN";
+
+function hashOtp(otp){
+  return crypto.createHash("sha256").update(String(otp)).digest("hex");
+}
+
+async function sendOwnerOtpEmail(email, otp){
+  const resp = await fetch("https://api.emailjs.com/api/v1.0/email/send",{
+    method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({
+      service_id:EMAILJS_SERVICE_ID,
+      template_id:EMAILJS_TEMPLATE_ID,
+      user_id:EMAILJS_PUBLIC_KEY,
+      template_params:{
+        to_email:email,
+        email:email,
+        name:"VG CHEATS Owner",
+        otp:String(otp),
+        app_name:"VG CHEATS"
+      }
+    })
+  });
+  if(!resp.ok){
+    const body=await resp.text().catch(()=>"");
+    throw new Error(`Email service failed (${resp.status}) ${body}`.slice(0,500));
+  }
+}
+
+exports.sendOwnerOtp = onCall({secrets:[OWNER_EMAILS]},async req=>{
+  const email=clean(req.data?.email).toLowerCase();
+  if(!email || !/^\S+@gmail\.com$/i.test(email))
+    throw new HttpsError("invalid-argument","Valid Gmail is required.");
+  if(!ownerEmails().includes(email))
+    throw new HttpsError("permission-denied","This Gmail is not the configured Owner Gmail.");
+
+  const ref=db.ref(OWNER_OTP_PATH);
+  const old=(await ref.get()).val()||{};
+  const now=Date.now();
+  if(old.sentAt && now-old.sentAt < 60_000)
+    throw new HttpsError("resource-exhausted","Please wait 60 seconds before requesting another OTP.");
+
+  const otp=String(crypto.randomInt(1000,10000));
+  await ref.set({
+    email,
+    otpHash:hashOtp(otp),
+    sentAt:now,
+    expiresAt:now+10*60*1000,
+    attempts:0
+  });
+
+  try{
+    await sendOwnerOtpEmail(email,otp);
+  }catch(e){
+    await ref.remove();
+    logger.error("Owner OTP email failed",e);
+    throw new HttpsError("internal","Could not send Owner OTP email.");
+  }
+  return {ok:true,expiresInSeconds:600};
+});
+
+exports.verifyOwnerOtp = onCall({secrets:[OWNER_EMAILS]},async req=>{
+  const email=clean(req.data?.email).toLowerCase();
+  const otp=clean(req.data?.otp);
+  if(!email || !/^\S+@gmail\.com$/i.test(email) || !/^\d{4}$/.test(otp))
+    throw new HttpsError("invalid-argument","Invalid Owner OTP request.");
+  if(!ownerEmails().includes(email))
+    throw new HttpsError("permission-denied","This Gmail is not the configured Owner Gmail.");
+
+  const ref=db.ref(OWNER_OTP_PATH);
+  const snap=await ref.get();
+  const rec=snap.val();
+  const now=Date.now();
+  if(!rec || rec.email!==email || now>(+rec.expiresAt||0)){
+    await ref.remove();
+    throw new HttpsError("deadline-exceeded","OTP expired. Please request a new OTP.");
+  }
+  const attempts=+rec.attempts||0;
+  if(attempts>=5){
+    await ref.remove();
+    throw new HttpsError("permission-denied","Too many incorrect attempts. Request a new OTP.");
+  }
+  if(hashOtp(otp)!==rec.otpHash){
+    await ref.update({attempts:attempts+1});
+    throw new HttpsError("permission-denied","Wrong OTP.");
+  }
+
+  let au;
+  try{ au=await admin.auth().getUserByEmail(email); }
+  catch(e){
+    if(e.code!=="auth/user-not-found") throw e;
+    au=await admin.auth().createUser({email,displayName:"Owner"});
+  }
+  await admin.auth().updateUser(au.uid,{displayName:"Owner"});
+  await setClaims(au.uid,"owner",{off:0,blocked:false});
+  await userRef(au.uid).update({username:"Owner",email,role:"owner",wallet:0,blocked:false});
+  await ref.remove();
+
+  const token=await admin.auth().createCustomToken(au.uid,{role:"owner",off:0,blocked:false});
+  return {token,user:{uid:au.uid,u:"Owner",username:"Owner",email,role:"owner",off:0,blocked:false,freePanels:[],wallet:0}};
 });
 
 exports.getMyProfile = onCall(async req=>{

@@ -1655,48 +1655,28 @@ function closeOwnerLogin(){
 function sendOtp(){
  const el=document.getElementById('o_gmail');
  const raw=el?String(el.value||''):'';
- // Remove invisible characters that can be introduced by browser autofill/copy-paste.
  const m=raw.replace(/[\u200B-\u200D\uFEFF]/g,'').trim().toLowerCase();
  const owner=String(OWNER_EMAIL).trim().toLowerCase();
  if(!/^[^\s@]+@gmail\.com$/.test(m)){
-  msgBox('Please enter a valid Gmail address\n(example: name@gmail.com)');
-  return;
+  msgBox('Please enter a valid Gmail address\n(example: name@gmail.com)'); return;
  }
- if(m!==owner){
-  msgBox('❌ This Gmail is not the Owner Gmail.');
-  return;
- }
- // Keep the verified owner address locally only as a convenience; it is not used to grant access.
- try{localStorage.setItem('vg_owner_email',owner);}catch(e){}
- try{if(el)el.value=owner;}catch(e){}
- demoOtp=String(Math.floor(1000+Math.random()*9000));
- document.getElementById('otpStep').style.display='block';
+ if(m!==owner){msgBox('❌ This Gmail is not the Owner Gmail.');return;}
+ if(el) el.value=owner;
+ const step=document.getElementById('otpStep');
  const db=document.getElementById('demoOtpBox');
- db.style.display='block';
- if(EMAIL_ON){
-  db.innerHTML='⏳ Sending OTP to <b>'+owner+'</b>...';
-  try{
-   emailjs.send(EMAILJS_SERVICE_ID,EMAILJS_TEMPLATE_ID,{to_email:owner,email:owner,name:'VG CHEATS',otp:demoOtp,app_name:'VG CHEATS'}).then(()=>{
-    db.innerHTML='📩 OTP sent to <b>'+owner+'</b> ✅<br><small style="color:#9ab">Check Inbox + Spam</small>';
-    showToast('📩 OTP sent to Owner Gmail');
-   }).catch(e=>{
-    db.innerHTML='❌ Email failed: '+(e&&e.text?e.text:'EmailJS error');
-    showToast('❌ OTP email failed');
-   });
-  }catch(e){
-   db.innerHTML='❌ Email service failed.';
-  }
-  return;
- }
- db.innerHTML='❌ Owner OTP email service is not configured.';
- showToast('❌ Email OTP service unavailable');
+ if(step) step.style.display='block';
+ if(db){db.style.display='block';db.innerHTML='⏳ Sending OTP to <b>'+owner+'</b>...';}
+ fn('sendOwnerOtp',{email:owner}).then(()=>{
+   if(db) db.innerHTML='📩 OTP sent to <b>'+owner+'</b> ✅<br><small style="color:#9ab">Check Inbox + Spam</small>';
+   showToast('📩 OTP sent to Owner Gmail');
+ }).catch(e=>{
+   if(db) db.innerHTML='❌ '+(e.message||'Unable to send OTP');
+   showToast('❌ OTP email failed');
+ });
 }
 
-function verifyOtp(){
- const v=document.getElementById('o_otp').value.trim();
- if(!demoOtp||v!==demoOtp){msgBox('❌ Wrong OTP! Send again.');return;}
- demoOtp=null;ownerLoginOK();
-}
+function verifyOtp(){ window.verifyOtp && window.verifyOtp(); }
+
 function enterShop(){
   document.getElementById('loginSec').classList.remove('show');
   document.getElementById('shop').classList.add('show');
@@ -3255,16 +3235,37 @@ try{if(window._restoreSession){window._restoreSession=false;enterShop();}}catch(
     }
   };
 
-  /* Owner modal still looks the same. OTP can be completed, but the final
-     authority is Firebase Google identity + server-side OWNER_EMAILS. */
-  window.ownerLoginOK=async function(){
-    closeOwnerLogin();
-    await window.googleLogin();
+  /* Owner OTP is a standalone Firebase-authenticated flow.
+     IMPORTANT: OTP verification must NOT open Google Login. */
+  window.ownerLoginOK=async function(authResult){
+    try{
+      if(!authResult || !authResult.token) throw new Error('Owner authentication token missing.');
+      await firebase.auth().signInWithCustomToken(authResult.token);
+      const p=authResult.user||{u:'Owner',email:OWNER_EMAIL,role:'owner',off:0};
+      sessionStorage.setItem('vg_user',p.u||'Owner');
+      sessionStorage.setItem('vg_role','owner');
+      sessionStorage.setItem('vg_off',0);
+      localSet('vg_secure_profile',p);
+      try{saveSession();}catch(e){}
+      closeOwnerLogin();
+      await secureSync();
+      const card=document.getElementById('loginCard');
+      if(card) card.classList.add('spinning');
+      setTimeout(enterShop,450);
+    }catch(e){
+      msgBox('❌ Owner login failed: '+(e.message||e));
+    }
   };
   window.verifyOtp=async function(){
-    const v=document.getElementById('o_otp').value.trim();
-    if(!demoOtp||v!==demoOtp){msgBox('❌ Wrong OTP!');return;}
-    demoOtp=null;await window.ownerLoginOK();
+    const v=String(document.getElementById('o_otp').value||'').trim();
+    if(!/^\d{4,6}$/.test(v)){msgBox('❌ Enter the OTP from your Gmail.');return;}
+    const email=String(OWNER_EMAIL).trim().toLowerCase();
+    try{
+      const r=await fn('verifyOwnerOtp',{email,otp:v});
+      await window.ownerLoginOK(r);
+    }catch(e){
+      msgBox('❌ OTP verification failed: '+(e.message||e));
+    }
   };
 
   /* Firebase-native password reset replaces the old client-side password reset. */
