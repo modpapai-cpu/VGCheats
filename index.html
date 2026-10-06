@@ -3231,16 +3231,15 @@ try{if(window._restoreSession){window._restoreSession=false;enterShop();}}catch(
   window.googleLogin=async function(){
     if(!GOOGLE_ON){msgBox('Firebase config is not set yet.');return;}
     try{
-      const res=await firebase.auth().signInWithPopup(new firebase.auth.GoogleAuthProvider());
-      const r=await fn('ensureGoogleRole',{});
-      const p=r.user;
-      sessionStorage.setItem('vg_user',p.u||p.username||res.user.email);
-      sessionStorage.setItem('vg_role',p.role);
-      sessionStorage.setItem('vg_off',p.off||0);
-      await secureSync();
-      const card=document.getElementById('loginCard');card.classList.add('spinning');
-      setTimeout(enterShop,700);
-    }catch(e){msgBox('❌ Google login failed: '+(e.message||e));}
+      // Redirect is used instead of a popup because Chrome/Vercel users may block
+      // Firebase's OAuth popup. Firebase recommends redirect as the robust fallback.
+      const provider=new firebase.auth.GoogleAuthProvider();
+      provider.setCustomParameters({prompt:'select_account'});
+      await firebase.auth().setPersistence(firebase.auth.Auth.Persistence.LOCAL);
+      await firebase.auth().signInWithRedirect(provider);
+    }catch(e){
+      msgBox('❌ Google login failed: '+(e.message||e));
+    }
   };
 
   /* Owner modal still looks the same. OTP can be completed, but the final
@@ -3504,12 +3503,27 @@ try{if(window._restoreSession){window._restoreSession=false;enterShop();}}catch(
     if(firebase.auth){
       firebase.auth().onAuthStateChanged(async u=>{
         if(u && !u.isAnonymous){
-          try{const r=await fn('getMyProfile',{});if(r&&r.user){
-            sessionStorage.setItem('vg_user',r.user.u||'');
-            sessionStorage.setItem('vg_role',r.user.role||'reseller');
-            sessionStorage.setItem('vg_off',r.user.off||0);
-            await secureSync();
-          }}catch(e){}
+          try{
+            const isGoogle=(u.providerData||[]).some(x=>x.providerId==='google.com');
+            let profileResult=null;
+            if(isGoogle){
+              // After Google redirect, create/resolve the secure role on the server.
+              profileResult=await fn('ensureGoogleRole',{});
+            }else{
+              profileResult=await fn('getMyProfile',{});
+            }
+            if(profileResult&&profileResult.user){
+              sessionStorage.setItem('vg_user',profileResult.user.u||profileResult.user.username||u.email||'');
+              sessionStorage.setItem('vg_role',profileResult.user.role||'reseller');
+              sessionStorage.setItem('vg_off',profileResult.user.off||0);
+              await secureSync();
+              // If the Google redirect just completed, return the user to the shop.
+              if(isGoogle && document.getElementById('loginSec')?.classList.contains('show')){
+                const card=document.getElementById('loginCard');card.classList.add('spinning');
+                setTimeout(enterShop,700);
+              }
+            }
+          }catch(e){console.warn('Firebase auth role sync:',e);}
         }
       });
     }
